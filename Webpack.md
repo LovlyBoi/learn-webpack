@@ -1065,3 +1065,97 @@ prettier：快速格式化代码，我们可以建一个文件来具体配置格
 ## devServer 和 HMR
 
 在开发时，我们不可能每次修改源代码都重新打包，我们需要一个开发时自动打包的工具。
+
+### watch 模式
+
+如果我们只是想监听源代码的改变并重新打包，我们可以执行 `webpack --watch` 命令来监视源代码变化。
+
+但是这样并不会帮助我们启动本地服务，而且有代码改变后会全部打包并写入文件，所以我们还希望帮我们自动启动一个本地服务，并能帮我们自动刷新页面。
+
+### devServer
+
+**安装**：
+
+```shell
+npm i -D webpack-dev-server
+```
+
+**启动**：
+
+```shell
+# webpack 5
+npx webpack serve
+```
+
+启动后会帮助我们打开一个本地服务器，默认会跑在 8080 端口。dev-server 不会生成打包文件，而是会打包进内存中。
+
+**原理**：
+
+自己实现一个本地服务：
+
+首先安装一下需要的依赖：
+
+```shell
+npm i -D webpack-dev-middleware express
+```
+
+然后开始搭建服务：
+
+```js
+// server.js
+const express = require('express')
+// webpack
+const webpack = require('webpack')
+// webpack dev 中间件
+const webpackDevMiddleware = require('webpack-dev-middleware')
+
+const app = express()
+
+// webpack传入配置信息，返回一个compiler
+const compiler = webpack(require('./webpack.config.js'))
+
+// 把compiler再传给webpack dev中间件，生成一个express中间件
+const middleware = webpackDevMiddleware(compiler)
+
+app.use(middleware)
+
+app.listen(8080, () => {
+  console.log('8080 is listening...')
+})
+```
+
+### HMR 模块热替换
+
+HMR（Hot Module Replacement），指的是在应用程序运行的过程中，替换、添加、删除模块，而无需重新刷新整个页面。这样做可以很大的提高我们的开发性能和效率。
+
+- HMR 不会重新刷新整个页面
+- 只更新变更的内容，提高开发效率
+- 修改了 CSS 和 JS 源代码，会立即在浏览器中更新，相当于直接在 devtools 修改样式
+
+webpack-dev-server 默认情况下使用 live reloading 技术，即每次改变实时刷新页面。如果我们希望启用 HMR，我们需要添加一下配置：
+
+```js
+// webpack.config.js
+module.exports = {
+  devServer: {
+    // 开启HMR，但是我们还需要指定哪些模块需要HMR
+		hot: true
+  }
+}
+
+// 源代码中：
+// 让math模块支持HMR
+module.hot.accept("./math.js", () => {
+	console.log('math 模块发生了更新')
+})
+```
+
+我们可以发现这么做非常麻烦，所以我们在开发中，还是会使用框架支持好的 HMR，比如 vue-loader、react-refresh 都是支持 HMR 的。
+
+**原理**：
+
+devServer 会创建两个服务：提供静态资源的服务（express）和 Socket 服务（net.Socket）。
+
+Webpack compiler 将打包出来的 bundle.js 给静态资源服务器，来让浏览器访问。因为对这个服务器的访问都是 http 访问，服务器没有办法对浏览器推送新的，修改后的模块，这时就需要一个长链接服务器（Socket 服务）来推送资源。
+
+webpack-dev-server 创建的第二个服务器就是 HMR Server，与浏览器中的 HMR runtime 建立了一个 socket 长链接，来将新的资源推送给浏览器。
