@@ -57,9 +57,34 @@ entry 配置项配置入口文件地址。
 
 ### output
 
-output 配置打包输出相关，output.filename 配置打包出的文件名，output.path 配置打包输出路径，必须是一个绝对路径。
+output 配置打包输出相关：
+
+- `output.filename`：配置打包出的文件名；
+- `output.path`：配置打包的输出路径，必须是一个绝对路径；
+- `output.publicPath`：配置打包后 index.html 引用的基本路径，默认值是一个空字符串，所以我们打包后引入 JS 文件时，路径是 `bundle.js`。在开发时，我们也将其设为 `/`，也就是路径为 `/bundle.js`；
+
+```js
+const { resolve } = require('path')
+
+module.exports = {
+  output: {
+    // 文件名
+    filename: 'bundle.js',
+    // 输出路径
+    path: resolve(__dirname, './build'),
+    // index.html打包引用的基本路径
+    publicPath: '/'
+  }
+}
+```
+
+**为什么 Vue 脚手架打包出来的应用无法直接运行？**
+
+因为 `publicPath` 被配置为 `/`，这是为了防止某些浏览器不会自动拼接这个 `/`，所以脚手架先加上一个，这样浏览器在请求路径为 `/bundle.js` 的文件时，就会使用 当前地址 + `/bundle.js` 来拼出完整的路径。而我们直接打开打包后的文件时，使用的并不是 http 协议，而是 file，这就导致了路径不正确，自然请求不到资源。而当我们把 `publicPath` 改为 `./` 之后，就可以正常的请求资源了。
 
 ### mode
+
+mode 配置当前打包的模式。
 
 配置打包的模式，默认是 propduction。
 
@@ -149,7 +174,34 @@ output 配置打包输出相关，output.filename 配置打包出的文件名，
   }
   ```
 
-  
+
+### resolve
+
+resolve 用于设置模块如何被解析。
+
+在开发时我们会依赖各种各样的模块，这些模块可能来自自己编写的代码，也可能是来自第三方库。resolve 可以帮助我们从每个 import/require 语句中，找到需要引入的合适模块代码。
+
+Webpack 能解析三种文件路径：
+
+- 绝对路径：不需要进一步解析。
+- 相对路径：根据我们资源所在的目录（上下文）获取资源的绝对路径。
+- 模块路径：在 resolve.modules 中指定的所有目录中检索，默认值是 `node_modules`。我们可以通过设置别名来替换初识模块路径。
+
+```js
+module.exports = {
+  resolve: {
+    // 尝试匹配模块后缀名
+    extenions: ['.wasm', '.mjs', '.js', '.json', '.jsx', '.ts', '.vue'],
+    // 给一个路径起别名，防止层级较深
+    alias: {
+      // @表示src目录
+      "@": path.resolve(__dirname, './src')
+    }
+  }
+}
+```
+
+
 
 ## Loader
 
@@ -1088,6 +1140,46 @@ npx webpack serve
 ```
 
 启动后会帮助我们打开一个本地服务器，默认会跑在 8080 端口。dev-server 不会生成打包文件，而是会打包进内存中。
+
+**配置**：
+
+`devServer` 配置本地服务相关：
+
+- `publicPath`：本地服务所在的文件夹，默认值是 `/`，如果我们将其改为 `/xxx`，那我们就需要通过 `http://localhost:8080/xxx` 才能访问到打包后的资源，并且这个时候，我们打包出的 index.html 中的资源路径也是访问不到的，需要将 `output.publicPath` 也设置为 `/xxx` 才行。官方也建议将这两个属性设置为相同的值。
+
+- `contentBase`：设置 dev-server 对外服务的内容来源。如果我们打包后的资源又依赖于其他的一些资源，需要指定从哪里查找这个内容。建议使用绝对路径
+
+- `host`：配置主机地址，比如希望其他子网的用户能访问，可以配置为 `0.0.0.0`（监听 IPV4 上的所有地址）。
+
+- `port`：监听哪一个端口。
+
+- `proxy`：配置代理信息，在开发环境下解决跨域
+
+  ```js
+  module.exports = {
+    devServer: {
+      proxy: {
+        "/api": {
+        	// 将所有/api请求代理到这个地址
+          target: "http://123.xxx.xx.xx:8000",
+          // 以/api开头的会被重写为空字符串，就可以去除/api了
+          pathRewrite: {
+            "^/api": ""
+          },
+          // 这个配置项开启会改变我们的请求源地址
+          // 比如我们的项目在本地的a地址，服务器在b地址，我们被代理的请求会显示我们是a地址，但是有时服务器会校验请求来源，如果不希望我们被校验失败，我们可以开启这个选项，请求就会显示我们也是b地址了。
+          changeOrigin: true,
+          // 解决开发时前端history路由刷新问题，本质上就是404时返回了index.html，前端拿到index.html自己进行路由。
+          historyApiFallback: true
+        }
+      }
+    }
+  }
+  ```
+
+  
+
+`devServer.publicPath` 是服务开启到哪个路径上，`output.publicPath` 是 `index.html` 中引用的资源路径前缀；至于 `devServer.contentBase`，是 dev-server 返回的静态资源文件夹，即 `app.get(devServer.publicPath, express.static(devServer.contentBase))`。
 
 **原理**：
 
