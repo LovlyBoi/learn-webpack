@@ -1251,3 +1251,132 @@ devServer 会创建两个服务：提供静态资源的服务（express）和 So
 Webpack compiler 将打包出来的 bundle.js 给静态资源服务器，来让浏览器访问。因为对这个服务器的访问都是 http 访问，服务器没有办法对浏览器推送新的，修改后的模块，这时就需要一个长链接服务器（Socket 服务）来推送资源。
 
 webpack-dev-server 创建的第二个服务器就是 HMR Server，与浏览器中的 HMR runtime 建立了一个 socket 长链接，来将新的资源推送给浏览器。
+
+## 环境分离
+
+
+
+现在我们希望将 Webpack 在开发和生产时的配置分开，这样我们就可以通过两个不同的命令来加载不同的 Webpack 配置。
+
+```json
+// package.json
+{
+	"script": {
+    // 开发时运行这个脚本，指定开发时配置文件
+    "serve": "webpack serve --config ./config/webpack.dev.js",
+    // 打包时运行这个脚本，指定生产时配置文件
+    "build": "webpack --config ./config/webpack.prod.js"
+  }
+}
+```
+
+这样我们将配置拆分为三个配置：
+
+- webpack.common.js 共有的配置
+- webpack.dev.js 开发时配置
+- webpack.prod.js 生产时配置
+
+判断环境：
+
+设置过 mode 后，DefinePlugin 会将 `process.env.NODE_ENV` 设置为 `"production" / "development"`，我们在源代码中可以根据这个值来判断。
+
+**合并配置**：
+
+我们还需要把 common 和开发或生产的配置合并起来，这里我们还需要一个库：webpack-merge。
+
+```shell
+npm i -D webpack-merge
+```
+
+```js
+// webpack.prod.js
+// 这里以生产环境举例，开发环境同理。
+
+// 引入webpack-merge
+const { merge } = require('webpack-merge')
+// 引入common配置
+const commonConfig = require('./webpack.common.js')
+
+module.exports = merge(commonConfig, {
+  // 生产环境配置
+  mode: 'production'
+})
+```
+
+## 代码分离
+
+现在我们打包出来的所有代码都在一个 JS 文件中，这会导致一个文件的加载速度非常慢，我们可以对打包的代码进行分离，来控制资源加载优先级，提高代码加载性能。
+
+Webpack 常用的代码分离有三种：
+
+- 入口起点：使用 entry 配置手动分离代码。
+
+  ```js
+  module.exports = {
+    entry: {
+      // 2个入口文件
+      main: './src/main.js',
+      index: './src/index.js'
+    },
+    output: {
+      // 文件名使用placeholder来添加名字
+      filename: '[name].bundle.js'
+    }
+  }
+  ```
+
+- 防止重复：使用 Entry Dependencies 或者 SplitChunksPlugin 去重和分离代码。
+
+  如果我们配置了多个入口，多个入口还依赖了同一个库，那么这个库会被打包多次。这时我们还需要配置优化：
+
+  ```js
+  // Entry Dependencies方式分离，不是很推荐
+  module.exports = {
+    entry: {
+      // 指明main和index都需要依赖这些
+      main: { import: './src/main.js', dependOn: 'shared' },
+      index: { import: './src/index.js', dependOn: 'shared' },
+      // 让这些依赖单独打包
+      shared: ['lodash', 'dayjs']
+    }
+  }
+  
+  // SplitChunksPlugin方式
+  // 该插件Webpack默认集成安装，我们可以手动修改他的默认配置
+  module.exports = {
+    optimization: {
+  		splitChunks: {
+        // 默认值是async，表示只有代码里异步加载模块才会对代码进行分离，initial表示对同步进行分离，all表示都进行分离
+        chunks: 'all',
+        // 最小值，默认是20000，单位是字节。表示如果拆分了一个包，那么我们拆分出的包最小也得是minSize（太小的包不拆，因为会影响网络传输）
+        minSize: 20000,
+        // 最大值，如果有包大于maxSize，会对他再次拆分，拆成不小于minSize的包
+        maxSize: 20000,
+        // 表示引入的包至少被导入几次才会拆分
+        minChunks: 2,
+        cacheGroups: {
+          vendor: {
+            // 匹配哪些第三方库，这里就是node_modules，这里需要一个路径
+            test: /[\\/]node_modules[\\/]/,
+            filename: "[id]_vendors.js"
+          }
+        }
+      }
+    }
+  }
+  ```
+
+  
+
+- 动态导入：通过模块的内联函数调用分离代码。
+
+  只要是异步导入（`import()`）的模块，都是分离打包的。
+
+  还可以使用魔法注释来确定 chunk 的 name。
+
+  ```js
+  const Foo = () => import(/* webpackChunkName: 'foo' */ './Foo.vue')
+  ```
+
+  
+
