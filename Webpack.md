@@ -203,6 +203,35 @@ module.exports = {
 
 
 
+### externals
+
+指定排除打包哪些库，可以将第三方库排除打包，选择使用 CDN 引入。
+
+```js
+module.exports = {
+  externals: {
+    // 不打包lodash，key填写暴露的全局对象
+    lodash: '_',
+      dayjs: 'dayjs'
+  }
+}
+```
+
+
+
+### optimization
+
+optimization 配置项配置了打包优化相关的配置项。
+
+**splitChunks**：
+
+- chunks: 
+  - async：默认值，表示只将异步引入的模块拆分
+  - initial：同步，
+  - all：所有符合配置参数的模块都会被拆分
+- runtimeChunk：配置 runtime 相关的代码是否抽取到一个单独的 chunk 中。runtime 相关的代码指的是在运行环境中，对模块进行解析、加载、模块信息相关的代码，模块信息清单在每次有模块变更(hash 变更)时都会变更, 所以我们想把这部分代码单独打包出来, 配合后端缓存策略, 这样就不会因为某个模块的变更导致包含**模块信息的模块**(通常会被包含在最后一个 bundle 中)缓存失效。`optimization.runtimeChunk = true ` 就是告诉 webpack 是否要把这部分单独打包出来。
+- cacheGroups：缓存组
+
 ## Loader
 
 使用 loader 有两种方式：配置方式、内联方式（cli 方式不支持了）。
@@ -1370,13 +1399,96 @@ Webpack 常用的代码分离有三种：
 
 - 动态导入：通过模块的内联函数调用分离代码。
 
-  只要是异步导入（`import()`）的模块，都是分离打包的。
+  **只要是异步导入（`import()`函数）的模块，都是分离打包的**。
 
   还可以使用魔法注释来确定 chunk 的 name。
 
   ```js
-  const Foo = () => import(/* webpackChunkName: 'foo' */ './Foo.vue')
+  const Foo = () => import(
+    // 指定打包名
+    /* webpackChunkName: 'foo' */ 
+    // 对包预下载，会在父chunk下载结束时立即下载（浏览器闲置时下载）
+    /* webpackPrefetch: true */
+    // 对包预加载，会在父chunk下载时并行下载，preLoad和prefetch只能写一个
+    /* webpackLoad: true */
+    './Foo.vue')
   ```
-
   
+  通过异步导入，我们可以实现代码懒加载。
 
+## CDN
+
+ 
+
+CDN 是内容分发网络，是指通过相互连接的网络系统，利用最靠近每个用户的服务器，更快的将文件发送给用户，来提高性能。
+
+在开发时，我们使用 CDN 主要是两种方式：
+
+- 打包所有的静态资源，放到 CDN 服务器，用户的所有资源通过 CDN 服务器加载。
+- 一些第三方的资源放到 CDN 服务器上。 
+
+想要使用 CDN，首先要买 CDN 服务器。
+
+**静态资源**：
+
+我们可以直接修改 publicPath，在打包时添加自己的 CDN 地址，这样所有的静态资源都会访问静态资源。
+
+**第三方库**：
+
+如果我们不配置，直接打包，那么我们的第三方库实际上是一起打包了，相当于放进了我们自己的服务器。
+
+所以我们在打包时，排除需要放入 CDN 的第三方库，在 index.html 中直接引入 CDN 链接。
+
+```js
+// webpack.config.js
+module.exports = {
+  // ...
+  externals: {
+    // 不打包lodash，key填写暴露的全局对象
+    lodash: '_',
+    dayjs: 'dayjs'
+  }
+}
+```
+
+ **小知识**：sctipt 的三个属性：
+
+- 不写：浏览器会暂停 HTML 的解析，去下载并执行 JS 代码，执行完再继续解析。
+-  async：浏览器等到遇到 script 标签先去下载，同时继续解析 HTML，下载好立即执行 JS 代码，会导致多个 async 脚本之间的执行顺序不确定。
+- defer：浏览器下载 script 文件，并继续解析 HTML，当 HTML 全部解析完成，才会执行代码，多个 defer 之间按照顺序执行，不会乱。
+
+## 提取 CSS
+
+MiniCssExtractPlugin 可以帮助我们将 CSS 提取到一个单独的文件中。
+
+```js
+const MiniCssExtractPlugin = reqire('mimi-css-extract-plugin')
+
+module.exports = {
+  modules: {
+    rules: [
+      {
+        test: /\.css$/,
+        use: [isProduction ? MiniCssExtractPlugin.loader : "style-loader", "css-loader"]
+      }
+    ]
+  },
+  plugins: [
+    new MiniCssExtractPlugin({
+      filename: "css/[name].[hash:8].css"
+    })
+  ]
+}
+```
+
+## Hash
+
+在我们给打包的文件命名时，会使用 placeholder，placeholder 中有几个属性比较相似：
+
+- hash：通过 MD4 散列函数处理后，生成一个 128 位的 hash 值（32 个十六进制）。对整个项目进行散列，适合项目变动就需要更新的文件名。
+- chunkhash：只会根据自己的依赖树进行散列，建议不需要根据整个项目变动的文件使用。
+- contenthash：根据包的内容进行散列，建议一些不依赖其他模块的文件使用。
+
+hash 值生成和整个项目有关，只要修改了项目，那么多个入口打包出来的文件名的 hash 都会变，导致浏览器缓存失效。
+
+建议对打包出来的 output.filename 使用 chunkhash，对每一个单独的 chunk 使用 chunkhash。
